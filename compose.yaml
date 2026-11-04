@@ -1,0 +1,12 @@
+services:
+  backend:
+    build:
+      context: .
+      target: development
+    ports:
+      - "127.0.0.1:5011:5011"
+    volumes:
+      - ./app:/app/app:ro
+    environment:
+      PORT: "5011"
+      WATCHFILES_FORCE_POLLING: "true"

@@ -8,3 +8,8 @@ dependencies = [
     "fastapi",
     "uvicorn",
 ]
+
+[dependency-groups]
+dev = [
+    "watchfiles>=1.3.0",
+]
