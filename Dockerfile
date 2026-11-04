@@ -4,6 +4,7 @@ FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 FROM python:3.14-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    APP_ENV=production \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \
     PATH="/opt/venv/bin:$PATH"
@@ -20,6 +21,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
 FROM dependencies AS development
+ENV APP_ENV=development
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project
 COPY app ./app

@@ -18,10 +18,12 @@ to update the environment and lockfile.
 ## Development
 
 ```powershell
+$env:APP_ENV = "development"
 uv run uvicorn app.main:app --reload
 ```
 
 The server runs at http://127.0.0.1:8000 by default. Stop it with Ctrl+C.
+Local development enables the interactive documentation.
 
 - Health check: http://127.0.0.1:8000/health — returns `{"status": "ok"}`.
 - Interactive API documentation: http://127.0.0.1:8000/docs
@@ -40,7 +42,8 @@ docker compose up --build
 ```
 
 Open http://localhost:5011/health, http://localhost:5011/docs, or
-http://localhost:5011/openapi.json. Local Docker listens on port 5011 both
+http://localhost:5011/openapi.json. The local Docker target sets `APP_ENV=development`
+and enables the interactive documentation. Local Docker listens on port 5011 both
 inside and outside the container.
 
 Edits under `app/` trigger automatic server reloads. The source mount is
@@ -84,7 +87,8 @@ docker run --rm --name guidance-backend -p 127.0.0.1:8000:8000 guidance-portal-b
 Open http://localhost:8000/health to verify the image. Stop with Ctrl+C or
 `docker stop guidance-backend` from another terminal. Use the same image
 configuration for VPS dev, UAT, and eventual production; only local development
-uses the `development` target and hot reload.
+uses the `development` target and hot reload. Production images default to
+`APP_ENV=production`, which disables `/docs`, `/redoc`, and `/openapi.json`.
 
 ## Dokploy: VPS dev and UAT
 
@@ -102,6 +106,7 @@ Git repository:
 | Build stage | Leave empty (defaults to production) | Leave empty (defaults to production) |
 | `PORT` environment variable | `5011` | `5021` |
 | Domain container port | `5011` | `5021` |
+| `APP_ENV` environment variable | `production` | `production` |
 
 1. Ensure both branches contain this Docker configuration. If the backend is
    later placed in a monorepo, adjust the Dockerfile path and build context to
@@ -123,7 +128,8 @@ Git repository:
    public health URL returns HTTP 200 and `{"status":"ok"}`:
    - https://dev-guidance-portal-backend.alexandromena.com/health
    - https://uat-guidance-portal-backend.alexandromena.com/health
-   Also check `/docs` and `/openapi.json` on both domains.
+   Confirm `/docs`, `/redoc`, and `/openapi.json` are unavailable on both
+   deployed environments. They remain enabled for local development only.
 7. Verify that a subsequent push to `dev` deploys only VPS dev and a push to
    `uat` deploys only UAT.
 
@@ -138,3 +144,16 @@ Deployments rebuild from committed code; VPS environments do not hot reload.
 Production will track `main`, using the same production image configuration.
 Its hosting and hostname are still to be decided. This setup does not provision
 DNS, Dokploy Applications, Git branches, databases, or remote deployments.
+
+### UAT production-level settings
+
+The UAT Application should use the production Docker target, `APP_ENV=production`,
+no reload command, HTTPS, and no published host port. Keep secrets in Dokploy's
+environment settings rather than Git. Give UAT its own credentials and data
+when a database is added. Limit access to UAT at the proxy or application layer
+if it should be private; HTTPS alone does not restrict who can sign in.
+
+For a production-ready operational setup, also configure Dokploy restart and
+resource limits, retain deployment/runtime logs, and monitor uptime and health.
+Add explicit CORS origins when the frontend begins calling this API. Keep
+database backups and restore checks in scope once persistent data is introduced.

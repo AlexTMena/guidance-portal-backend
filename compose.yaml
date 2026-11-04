@@ -8,5 +8,6 @@ services:
     volumes:
       - ./app:/app/app:ro
     environment:
+      APP_ENV: development
       PORT: "5011"
       WATCHFILES_FORCE_POLLING: "true"
