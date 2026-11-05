@@ -19,6 +19,48 @@ Keep route handlers focused on HTTP concerns. Put shared configuration and
 authentication dependencies in `core/`, database operations in `db/`, and
 validated request/response shapes in `schemas/`.
 
+## Seed test catalog
+
+The test catalog seed script creates or updates the five starter tests in the
+MongoDB `tests` collection. Each document stores only the test `name`; MongoDB
+generates its `_id` automatically. It is safe to run repeatedly: records are
+upserted by `name`, and unrelated documents are not deleted. The script also
+removes the old `id` field from these five records if they were seeded by an
+earlier version. It is never run automatically by FastAPI.
+
+With a local backend `.env` configured for the database you intend to populate:
+
+```powershell
+uv run --env-file .env python -m app.scripts.seed_tests
+```
+
+To run it against the database configured in a running Docker Compose backend:
+
+```powershell
+docker compose exec backend python -m app.scripts.seed_tests
+```
+
+To seed the 21-item Beck questionnaire version from the user-provided PDF into
+`test_questions`, run:
+
+```powershell
+uv run --env-file .env python -m app.scripts.seed_beck_questions
+```
+
+Or, for the database configured in Docker Compose:
+
+```powershell
+docker compose exec backend python -m app.scripts.seed_beck_questions
+```
+
+The script is repeatable and upserts by test and question key. It replaces the
+earlier demo prompts for this test and keeps each choice's 0-3 score value.
+Question content is versioned as `uploaded-pdf-v1`; the script is never run
+automatically by FastAPI.
+
+Check `MONGODB_DATABASE` before running the command so you seed the intended
+local, dev, or UAT database. Keep the database URI private.
+
 ## Setup
 
 Install Python 3.14 and uv, then run these commands from this directory:
@@ -185,6 +227,13 @@ profile and role-management endpoints require a valid BFF token.
 
 - `GET /auth/me` returns the authenticated user's Google subject, email, name,
   and current role.
+- `GET /tests` returns the test catalog from MongoDB. It requires a valid BFF
+  token and returns MongoDB's generated identifier as `id` alongside each test
+  name for use as a frontend list key.
+- `GET /tests/{test_id}` returns one catalog entry by MongoDB identifier and
+  requires a valid BFF token.
+- `GET /tests/{test_id}/questions` returns the ordered question records for a
+  catalog entry and requires a valid BFF token.
 - `PATCH /admin/users/{google_sub}/role` changes a user's role and is restricted
   to admins. Valid roles are `student`, `counselor`, and `admin`; admins cannot
   change their own role.
