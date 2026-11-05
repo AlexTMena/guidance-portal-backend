@@ -2,6 +2,23 @@
 
 A minimal FastAPI service running on Python 3.14 with dependencies managed by uv.
 
+## Project layout
+
+```text
+app/
+├── api/
+│   ├── routes/       # HTTP endpoint handlers
+│   └── router.py     # Combines route modules
+├── core/             # Environment configuration and auth dependencies
+├── db/               # MongoDB connection lifecycle and access helpers
+├── schemas/          # Pydantic request and response models
+└── main.py           # FastAPI app and lifespan setup
+```
+
+Keep route handlers focused on HTTP concerns. Put shared configuration and
+authentication dependencies in `core/`, database operations in `db/`, and
+validated request/response shapes in `schemas/`.
+
 ## Setup
 
 Install Python 3.14 and uv, then run these commands from this directory:
@@ -157,3 +174,24 @@ For a production-ready operational setup, also configure Dokploy restart and
 resource limits, retain deployment/runtime logs, and monitor uptime and health.
 Add explicit CORS origins when the frontend begins calling this API. Keep
 database backups and restore checks in scope once persistent data is introduced.
+
+## Authentication API and MongoDB
+
+FastAPI accepts only short-lived RS256 bearer tokens issued by the Next.js BFF.
+It validates the signature, issuer, audience, expiration, and token use, then
+loads the current user role from MongoDB. It does not trust browser-supplied
+identity headers. `/health` remains public for container health checks; the
+profile and role-management endpoints require a valid BFF token.
+
+- `GET /auth/me` returns the authenticated user's Google subject, email, name,
+  and current role.
+- `PATCH /admin/users/{google_sub}/role` changes a user's role and is restricted
+  to admins. Valid roles are `student`, `counselor`, and `admin`; admins cannot
+  change their own role.
+
+Configure `MONGODB_URI`, `MONGODB_DATABASE`, `API_TOKEN_ISSUER`,
+`API_TOKEN_AUDIENCE`, and `API_TOKEN_PUBLIC_KEY_B64` from the backend
+`.env.sample` or Dokploy environment settings. Production startup requires
+MongoDB. Local development can run without MongoDB, but protected endpoints
+return unavailable until a database is configured. The frontend README contains
+the step-by-step Google OAuth, Atlas, and per-environment key setup.
