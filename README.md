@@ -54,9 +54,9 @@ docker compose exec backend python -m app.scripts.seed_beck_questions
 ```
 
 The script is repeatable and upserts by test and question key. It replaces the
-earlier demo prompts for this test and keeps each choice's 0-3 score value.
-Question content is versioned as `uploaded-pdf-v1`; the script is never run
-automatically by FastAPI.
+earlier demo prompts for this test and keeps each choice's 0-3 score value. The
+question set is treated as fixed; the script also removes legacy question
+version metadata when it runs. It is never run automatically by FastAPI.
 
 Check `MONGODB_DATABASE` before running the command so you seed the intended
 local, dev, or UAT database. Keep the database URI private.
@@ -234,9 +234,37 @@ profile and role-management endpoints require a valid BFF token.
   requires a valid BFF token.
 - `GET /tests/{test_id}/questions` returns the ordered question records for a
   catalog entry and requires a valid BFF token.
+- `GET /tests/{test_id}/responses/draft` returns only the signed-in user's own
+  unfinished Beck draft. `PUT` on the same route saves or updates that draft.
+- `POST /tests/{test_id}/responses/draft/start` starts or resumes that user's
+  active attempt and returns its opaque attempt ID.
+- `POST /tests/{test_id}/responses/submit` validates all 21 Beck answers,
+  calculates the total on the backend, stores the submission, and returns the
+  score and interpretation. The backend reads option scores from MongoDB; it
+  does not trust a client-provided score.
+- `GET /tests/{test_id}/responses/me` returns the signed-in user's score and
+  interpretation for their latest submission without returning item-level
+  answers.
+- `GET /tests/{test_id}/responses/staff` returns submitted item-level answers
+  and is restricted to users whose current role is `counselor` or `admin`.
+  The endpoint returns at most 100 submissions per request.
 - `PATCH /admin/users/{google_sub}/role` changes a user's role and is restricted
   to admins. Valid roles are `student`, `counselor`, and `admin`; admins cannot
   change their own role.
+
+Beck answers and scores are stored in `test_responses`. The participant can
+save and resume their own draft and see their aggregate score after submission;
+only counselors and admins can retrieve submitted item-level answers. A
+participant can start another attempt after submitting; earlier submissions
+remain available to staff. The category thresholds follow the interpretation
+table in the supplied Beck PDF: 1–10, 11–16, 17–20,
+21–30, 31–40, and over 40. The minimum possible score (0) is grouped with the
+lowest band. The displayed category is screening feedback, not a diagnosis.
+
+The staff response includes a follow-up flag when Beck item 9 is scored above
+zero. This flag is not an alert or a complete risk assessment. The organization
+must define and staff a timely follow-up procedure before using the assessment
+with real participants.
 
 Configure `MONGODB_URI`, `MONGODB_DATABASE`, `API_TOKEN_ISSUER`,
 `API_TOKEN_AUDIENCE`, and `API_TOKEN_PUBLIC_KEY_B64` from the backend

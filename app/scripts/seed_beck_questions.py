@@ -4,7 +4,6 @@ from pymongo import MongoClient, UpdateOne
 
 
 TEST_NAME = "Beck's Depression Inventory"
-QUESTION_SET_VERSION = "uploaded-pdf-v1"
 
 
 def _item(number: int, statements: list[str]) -> dict:
@@ -19,7 +18,6 @@ def _item(number: int, statements: list[str]) -> dict:
             for score, statement in enumerate(statements)
         ],
         "is_demo": False,
-        "question_set_version": QUESTION_SET_VERSION,
     }
 
 
@@ -177,7 +175,10 @@ def main() -> None:
             [
                 UpdateOne(
                     {"test_id": test["_id"], "key": question["key"]},
-                    {"$set": {"test_id": test["_id"], **question}},
+                    {
+                        "$set": {"test_id": test["_id"], **question},
+                        "$unset": {"question_set_version": ""},
+                    },
                     upsert=True,
                 )
                 for question in QUESTIONS
