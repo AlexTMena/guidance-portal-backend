@@ -16,6 +16,7 @@ class StartedAttempt(BaseModel):
 
 
 class TestResult(BaseModel):
+    attempt_id: UUID
     score: int = Field(ge=0, le=63)
     max_score: int = 63
     category: str

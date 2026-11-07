@@ -97,6 +97,7 @@ def _interpret_score(score: int) -> tuple[str, str]:
 
 def _result(document: dict) -> TestResult:
     return TestResult(
+        attempt_id=document["attempt_id"],
         score=document["score"],
         max_score=63,
         category=document["category"],

@@ -88,6 +88,35 @@ Local development enables the interactive documentation.
 - Interactive API documentation: http://127.0.0.1:8000/docs
 - OpenAPI schema: http://127.0.0.1:8000/openapi.json
 
+## Counseling calendar
+
+Students can book one counseling appointment for a submitted Beck assessment
+by selecting an empty calendar time. Counselors and administrators see the
+shared calendar; counselors claim unassigned bookings, and staff can postpone
+or cancel a booking. A postponed assessment can be booked again; a canceled
+assessment cannot. Booking times are stored in UTC. The frontend displays them
+in Asia/Manila time.
+
+The API provides:
+
+- GET /counseling/appointments?start=<ISO>&end=<ISO>&attempt_id=<UUID> —
+  the requesting student's bookings or the shared staff calendar.
+- POST /counseling/appointments — student books a selected time for a submitted
+  Beck attempt_id.
+- POST /counseling/appointments/{appointment_id}/claim — counselor claims an unassigned
+  booking.
+- POST /counseling/appointments/{appointment_id}/postpone and /cancel — staff changes a
+  booking state.
+
+FastAPI derives identity and role from the verified Next.js BFF token. Students
+only receive their own bookings; unoccupied calendar times can be selected
+directly. Staff receives the student and assessment details needed to handle
+appointments. Clicking a calendar time opens a confirmation dialog where the
+student chooses the start; the end is fixed to exactly one hour later. Dragging
+a range pre-fills the start time. Start times use 30-minute increments between
+7:00 AM and 6:00 PM Manila time. MongoDB unique indexes reserve each half-hour block and prevent
+overlapping appointments or duplicate active bookings under concurrent requests.
+
 No environment variables are required for this initial service. Local `.env`
 files are ignored by Git; `.env.example` can be committed when configuration
 is added.
