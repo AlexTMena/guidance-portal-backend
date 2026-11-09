@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.security import get_current_user
@@ -27,3 +28,31 @@ async def update_user_role(
     if result.matched_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return {"google_sub": google_sub, "role": body.role}
+
+
+@router.patch("/users/by-id/{user_id}/role")
+async def update_user_role_by_id(
+    user_id: str,
+    body: RoleUpdate,
+    user=Depends(get_current_user),
+    database=Depends(require_database),
+) -> dict[str, str]:
+    if user["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    target = await database.app_users.find_one(
+        {"_id": ObjectId(user_id)},
+        {"auth_user_id": 1},
+    )
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if target.get("auth_user_id") == user["auth_user_id"]:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admins cannot change their own role")
+
+    await database.app_users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": body.role, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"user_id": user_id, "role": body.role}
