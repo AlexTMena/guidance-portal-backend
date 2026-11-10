@@ -68,6 +68,18 @@ async def connect_mongodb(app) -> AsyncMongoClient | None:
     await client.admin.command("ping")
     app.state.mongo_client = client
     app.state.database = client[DATABASE_NAME]
+    await app.state.database.forms.create_index(
+        [("form_key", 1)], unique=True, name="unique_form_key"
+    )
+    await app.state.database.form_submissions.create_index(
+        [("form_key", 1), ("student_user_id", 1)],
+        unique=True,
+        name="one_cumulative_form_submission_per_student",
+    )
+    await app.state.database.test_responses.create_index(
+        [("respondent_id", 1), ("status", 1), ("submitted_at", -1)],
+        name="student_submitted_test_history",
+    )
     await app.state.database.counseling_slots.create_index(
         [("status", 1), ("starts_at", 1)], name="calendar_status_starts_at"
     )
