@@ -53,6 +53,29 @@ Or, for the database configured in Docker Compose:
 docker compose exec backend python -m app.scripts.seed_beck_questions
 ```
 
+To add the Student Cumulative Form (`OVPAA-SAS-GCO-04`) to the configured
+MongoDB database, run the seed once per environment:
+
+```powershell
+uv run --env-file .env python -m app.scripts.seed_student_cumulative_form
+```
+
+For the backend database configured in Docker Compose:
+
+```powershell
+docker compose exec backend python -m app.scripts.seed_student_cumulative_form
+```
+
+In Dokploy, open the backend container's terminal and run:
+
+```sh
+python -m app.scripts.seed_student_cumulative_form
+```
+
+The seed inserts the built-in form definition only when it is not already
+present. It never runs automatically at application startup and does not
+overwrite an existing form. Check `MONGODB_DATABASE` before running it.
+
 The script is repeatable and upserts by test and question key. It replaces the
 earlier demo prompts for this test and keeps each choice's 0-3 score value. The
 question set is treated as fixed; the script also removes legacy question

@@ -21,6 +21,7 @@ class StaffUser(BaseModel):
     email: str
     role: Literal["student", "counselor", "admin"]
     created_at: datetime | None = None
+    registration_status: Literal["complete", "incomplete"] | None = None
 
 
 class StaffUserPage(BaseModel):

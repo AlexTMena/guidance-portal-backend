@@ -358,3 +358,50 @@ async def list_submitted_responses_for_staff(
         )
         for document in documents
     ]
+
+
+@router.get("/{test_id}/responses/{attempt_id}", response_model=StaffTestResponse)
+async def get_submitted_response(
+    test_id: str,
+    attempt_id: UUID,
+    user: CurrentUser,
+    database=Depends(require_database),
+) -> StaffTestResponse:
+    role = user.get("role")
+    if role not in {"student", "counselor", "admin"}:
+        raise HTTPException(status_code=403, detail="Not authorized to view submitted responses")
+    if not ObjectId.is_valid(test_id):
+        raise HTTPException(status_code=404, detail="Submitted response not found")
+
+    test_object_id = ObjectId(test_id)
+    if await database.tests.find_one({"_id": test_object_id}, {"_id": 1}) is None:
+        raise HTTPException(status_code=404, detail="Submitted response not found")
+
+    query = {
+        "test_id": test_object_id,
+        "attempt_id": str(attempt_id),
+        "status": "submitted",
+    }
+    if role == "student":
+        query["respondent_id"] = user["auth_user_id"]
+    document = await database.test_responses.find_one(query, {"_id": 0})
+    if document is None:
+        raise HTTPException(status_code=404, detail="Submitted response not found")
+
+    respondent = await database.app_users.find_one(
+        {"auth_user_id": document["respondent_id"]},
+        {"_id": 0, "name": 1, "email": 1},
+    )
+    return StaffTestResponse(
+        attempt_id=document["attempt_id"],
+        respondent_id=document["respondent_id"],
+        respondent_name=(respondent or {}).get("name", "Unknown user"),
+        respondent_email=(respondent or {}).get("email", ""),
+        answers=document["answers"],
+        score=document["score"],
+        max_score=63,
+        category=document["category"],
+        interpretation=document["interpretation"],
+        submitted_at=document["submitted_at"],
+        self_harm_follow_up_flag=document.get("self_harm_follow_up_flag", False),
+    )
