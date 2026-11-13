@@ -1,1 +1,1 @@
-"""Guidance portal backend application."""
+"""e-Gabay backend application."""

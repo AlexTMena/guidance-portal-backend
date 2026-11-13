@@ -1,7 +1,7 @@
 [project]
 name = "guidance-portal-backend"
 version = "0.1.0"
-description = "FastAPI backend for the guidance portal"
+description = "FastAPI backend for e-Gabay"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
