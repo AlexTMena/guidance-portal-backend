@@ -34,6 +34,7 @@ class FormSection(BaseModel):
     title: str
     description: str | None = None
     condition: FormCondition | None = None
+    layout: Literal["rating_matrix"] | None = None
     questions: list[FormQuestion]
 
 
@@ -42,6 +43,7 @@ class SurveyForm(BaseModel):
     form_number: str
     title: str
     version: int
+    access_mode: Literal["always", "request"] = "always"
     sections: list[FormSection]
 
 
@@ -66,3 +68,39 @@ class StaffSurveySubmission(SurveySubmission):
     student_id: str
     student_name: str
     student_email: str
+
+
+class StaffSurveyCatalogItem(BaseModel):
+    form_key: str
+    form_number: str
+    title: str
+
+
+class StaffSurveyResponseItem(BaseModel):
+    student_id: str
+    student_name: str
+    student_email: str
+    submitted_at: datetime
+
+
+class StaffSurveyResponsePage(BaseModel):
+    items: list[StaffSurveyResponseItem]
+    total: int
+    limit: int
+    skip: int
+
+
+class AvailableSurvey(BaseModel):
+    form_key: str
+    form_number: str
+    title: str
+    requested_at: datetime | None = None
+    submitted_at: datetime | None = None
+
+
+class SurveyAccessRequest(BaseModel):
+    form_key: str
+    form_number: str
+    title: str
+    requested_at: datetime | None = None
+    submitted_at: datetime | None = None

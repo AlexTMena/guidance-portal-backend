@@ -1,13 +1,15 @@
 import os
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
 from pymongo import AsyncMongoClient
-from pymongo.errors import BulkWriteError
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 
 from app.core.config import APP_ENV, DATABASE_NAME
 
 _COUNSELING_BLOCK = timedelta(minutes=30)
+logger = logging.getLogger(__name__)
 
 
 def _occupied_blocks(starts_at: datetime, ends_at: datetime) -> list[datetime]:
@@ -76,10 +78,32 @@ async def connect_mongodb(app) -> AsyncMongoClient | None:
         unique=True,
         name="one_cumulative_form_submission_per_student",
     )
+    await app.state.database.form_submissions.create_index(
+        [("form_key", 1), ("submitted_at", -1)],
+        name="survey_submissions_by_form_and_date",
+    )
+    await app.state.database.form_access_requests.create_index(
+        [("form_key", 1), ("student_user_id", 1)],
+        unique=True,
+        name="one_access_request_per_form_per_student",
+    )
     await app.state.database.test_responses.create_index(
         [("respondent_id", 1), ("status", 1), ("submitted_at", -1)],
         name="student_submitted_test_history",
     )
+    try:
+        await app.state.database.test_responses.create_index(
+            [("respondent_id", 1), ("test_id", 1)],
+            unique=True,
+            partialFilterExpression={"status": "submitted"},
+            name="one_submission_per_student_test",
+        )
+    except DuplicateKeyError:
+        logger.warning(
+            "Could not create one_submission_per_student_test because duplicate "
+            "submitted test responses exist. Run `python -m app.scripts.clear_test_responses` "
+            "in this environment to reset them, then the index will be created on the next startup."
+        )
     await app.state.database.counseling_slots.create_index(
         [("status", 1), ("starts_at", 1)], name="calendar_status_starts_at"
     )

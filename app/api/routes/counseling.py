@@ -13,6 +13,10 @@ from app.schemas.counseling import CounselingEvent, StudentBookingCreate
 
 router = APIRouter(prefix="/counseling", tags=["counseling"])
 BDI_NAME = "Beck's Depression Inventory"
+DASS21_NAME = "Depression Anxiety Stress Scales - 21 (DASS21)"
+BRS_NAME = "THE BRIEF RESILIENCE SCALE"
+PCL5_NAME = "PTSD Checklist for DSM-5 (PCL-5)"
+SUPPORTED_TESTS = {BDI_NAME, DASS21_NAME, BRS_NAME, PCL5_NAME}
 ACTIVE_STATUSES = {"booked", "claimed"}
 MANILA = ZoneInfo("Asia/Manila")
 BLOCK_SIZE = timedelta(minutes=30)
@@ -30,16 +34,23 @@ def _utc(value: datetime) -> datetime:
 
 def _event(document: dict, *, staff: bool, user_by_id: dict, test_name: str | None = None) -> CounselingEvent:
     status_value = document["status"]
+    is_assessment = bool(document.get("assessment_attempt_id"))
+    booking_type = "assessment" if is_assessment else "request"
     if staff:
         student = user_by_id.get(document.get("student_id"), {})
-        state_label = {
-            "booked": "Unclaimed",
-            "claimed": "Claimed",
-            "needs_reschedule": "Needs reschedule",
-            "cancelled": "Canceled",
-        }.get(status_value)
+        accepted_by_id = document.get("accepted_by") or document.get("claimed_by")
+        accepted_by = user_by_id.get(accepted_by_id, {})
+        assessment_name = test_name or BDI_NAME
+        short_name = {
+            BDI_NAME: "BDI",
+            DASS21_NAME: "DASS21",
+            BRS_NAME: "BRS",
+            PCL5_NAME: "PCL-5",
+        }.get(assessment_name, assessment_name)
         title = (
-            f"{test_name or BDI_NAME} · {student.get('name', 'Unknown student')} · {state_label}"
+            f"{short_name} - {student.get('name', 'Unknown student')}"
+            if is_assessment and status_value in ACTIVE_STATUSES | {"needs_reschedule", "cancelled"}
+            else f"Counseling - {student.get('name', 'Unknown student')}"
             if status_value in ACTIVE_STATUSES | {"needs_reschedule", "cancelled"}
             else "Available counseling"
         )
@@ -49,11 +60,17 @@ def _event(document: dict, *, staff: bool, user_by_id: dict, test_name: str | No
             ends_at=_utc(document["ends_at"]),
             status=status_value,
             title=title,
+            booking_type=booking_type,
             attempt_id=document.get("assessment_attempt_id"),
+            test_id=str(document["test_id"]) if is_assessment and document.get("test_id") else None,
             test_name=test_name if document.get("assessment_attempt_id") else None,
+            student_note=document.get("student_note"),
             student_name=student.get("name") if document.get("student_id") else None,
             student_email=student.get("email") if document.get("student_id") else None,
             counselor_name=user_by_id.get(document.get("claimed_by"), {}).get("name"),
+            accepted_by_name=accepted_by.get("name"),
+            accepted_by_role=accepted_by.get("role"),
+            accepted_at=document.get("accepted_at") or document.get("claimed_at"),
         )
 
     title = "Available counseling" if status_value == "available" else "My counseling appointment"
@@ -63,6 +80,8 @@ def _event(document: dict, *, staff: bool, user_by_id: dict, test_name: str | No
         ends_at=_utc(document["ends_at"]),
         status=status_value,
         title=title,
+        booking_type=booking_type,
+        student_note=document.get("student_note"),
         counselor_name=user_by_id.get(document.get("claimed_by"), {}).get("name"),
     )
 
@@ -80,8 +99,8 @@ async def _verify_submitted_attempt(database, attempt_id: str, student_id: str) 
     if response is None:
         raise HTTPException(status_code=404, detail="Submitted assessment attempt not found")
     test = await database.tests.find_one({"_id": response["test_id"]}, {"name": 1})
-    if test is None or test.get("name") != BDI_NAME:
-        raise HTTPException(status_code=409, detail="Counseling booking is only available for a submitted Beck assessment")
+    if test is None or test.get("name") not in SUPPORTED_TESTS:
+        raise HTTPException(status_code=409, detail="Counseling booking requires a submitted supported assessment")
     return test
 
 
@@ -101,6 +120,7 @@ async def list_calendar_events(
     start: datetime = Query(),
     end: datetime = Query(),
     attempt_id: str | None = Query(default=None, max_length=64),
+    booking_type: str | None = Query(default=None, pattern="^(assessment|request)$"),
 ) -> list[CounselingEvent]:
     if start.tzinfo is None or end.tzinfo is None or end <= start:
         raise HTTPException(status_code=422, detail="A valid timezone-aware calendar range is required")
@@ -118,27 +138,36 @@ async def list_calendar_events(
     else:
         if user.get("role") != "student":
             raise HTTPException(status_code=403, detail="Student or staff role required")
-        if not attempt_id:
-            raise HTTPException(status_code=422, detail="attempt_id is required")
-        await _verify_submitted_attempt(database, attempt_id, user["auth_user_id"])
-        # Empty calendar times are bookable, so students only receive their own events.
-        query = {
-            "student_id": user["auth_user_id"],
-            "assessment_attempt_id": attempt_id,
-            "status": {"$ne": "available"},
-        }
+        if attempt_id:
+            await _verify_submitted_attempt(database, attempt_id, user["auth_user_id"])
+            booking_type = "assessment"
+            query = {
+                "student_id": user["auth_user_id"],
+                "assessment_attempt_id": attempt_id,
+                "status": {"$ne": "available"},
+            }
+        elif booking_type == "request":
+            query = {
+                "student_id": user["auth_user_id"],
+                "booking_type": "request",
+                "status": {"$ne": "available"},
+                "starts_at": {"$lt": _utc(end)},
+                "ends_at": {"$gt": _utc(start)},
+            }
+        else:
+            raise HTTPException(status_code=422, detail="A request booking type or submitted attempt is required")
     documents = await database.counseling_slots.find(query).sort("starts_at", 1).to_list(length=500)
     user_ids = {
         value
         for document in documents
-        for value in (document.get("student_id"), document.get("claimed_by"))
+        for value in (document.get("student_id"), document.get("claimed_by"), document.get("accepted_by"))
         if value
     } if staff else set()
     user_by_id = {}
     if user_ids:
         users = await database.app_users.find(
             {"auth_user_id": {"$in": list(user_ids)}},
-            {"_id": 0, "auth_user_id": 1, "name": 1, "email": 1},
+            {"_id": 0, "auth_user_id": 1, "name": 1, "email": 1, "role": 1},
         ).to_list(length=len(user_ids))
         user_by_id = {item["auth_user_id"]: item for item in users}
 
@@ -186,16 +215,18 @@ async def create_student_booking(
             status_code=422,
             detail="Choose a future one-hour appointment on one day, starting between 7:00 AM and 6:00 PM Manila time",
         )
+    test = None
     attempt_id = body.attempt_id
-    test = await _verify_submitted_attempt(database, attempt_id, user["auth_user_id"])
-    prior = await database.counseling_slots.find_one(
-        {"assessment_attempt_id": attempt_id, "student_id": user["auth_user_id"], "status": "cancelled"},
-        {"_id": 1},
-    )
-    if prior:
-        raise HTTPException(status_code=409, detail="This counseling request was canceled and cannot be booked again")
-    if await database.counseling_slots.find_one({"active_attempt_id": attempt_id}, {"_id": 1}):
-        raise HTTPException(status_code=409, detail="This assessment already has an active counseling booking")
+    if attempt_id:
+        test = await _verify_submitted_attempt(database, attempt_id, user["auth_user_id"])
+        prior = await database.counseling_slots.find_one(
+            {"assessment_attempt_id": attempt_id, "student_id": user["auth_user_id"], "status": "cancelled"},
+            {"_id": 1},
+        )
+        if prior:
+            raise HTTPException(status_code=409, detail="This counseling request was canceled and cannot be booked again")
+        if await database.counseling_slots.find_one({"active_attempt_id": attempt_id}, {"_id": 1}):
+            raise HTTPException(status_code=409, detail="This assessment already has an active counseling booking")
     overlap = await database.counseling_slots.find_one(
         {
             "status": {"$in": list(ACTIVE_STATUSES)},
@@ -224,11 +255,16 @@ async def create_student_booking(
         "ends_at": ends_at,
         "status": "booked",
         "student_id": user["auth_user_id"],
-        "assessment_attempt_id": attempt_id,
-        "active_attempt_id": attempt_id,
-        "test_id": test.get("_id"),
+        "booking_type": "assessment" if attempt_id else "request",
+        "student_note": body.note,
         "booked_at": datetime.now(timezone.utc),
     }
+    if attempt_id and test:
+        document.update({
+            "assessment_attempt_id": attempt_id,
+            "active_attempt_id": attempt_id,
+            "test_id": test.get("_id"),
+        })
     try:
         await database.counseling_slots.insert_one(document)
     except DuplicateKeyError as exc:
@@ -242,19 +278,36 @@ async def create_student_booking(
 
 @router.post("/appointments/{slot_id}/claim", response_model=CounselingEvent)
 async def claim_booking(slot_id: str, user: CurrentUser, database=Depends(require_database)) -> CounselingEvent:
-    if user.get("role") != "counselor":
-        raise HTTPException(status_code=403, detail="Counselor role required")
+    if not _staff(user):
+        raise HTTPException(status_code=403, detail="Counselor or admin role required")
     if not ObjectId.is_valid(slot_id):
         raise HTTPException(status_code=404, detail="Appointment was not found")
+    accepted_at = datetime.now(timezone.utc)
     document = await database.counseling_slots.find_one_and_update(
         {"_id": ObjectId(slot_id), "status": "booked"},
-        {"$set": {"status": "claimed", "claimed_by": user["auth_user_id"], "claimed_at": datetime.now(timezone.utc)}},
+        {"$set": {
+            "status": "claimed",
+            "claimed_by": user["auth_user_id"],
+            "claimed_at": accepted_at,
+            "accepted_by": user["auth_user_id"],
+            "accepted_at": accepted_at,
+        }},
         return_document=ReturnDocument.AFTER,
     )
     if document is None:
-        raise HTTPException(status_code=409, detail="Appointment has already been claimed or is no longer active")
+        raise HTTPException(status_code=409, detail="Appointment has already been accepted or is no longer active")
     student = await database.app_users.find_one({"auth_user_id": document.get("student_id")}, {"_id": 0, "auth_user_id": 1, "name": 1, "email": 1})
-    return _event(document, staff=True, user_by_id={student["auth_user_id"]: student} if student else {})
+    accepting_staff = await database.app_users.find_one({"auth_user_id": user["auth_user_id"]}, {"_id": 0, "auth_user_id": 1, "name": 1, "role": 1})
+    test = await database.tests.find_one({"_id": document.get("test_id")}, {"name": 1})
+    user_by_id = {student["auth_user_id"]: student} if student else {}
+    if accepting_staff:
+        user_by_id[accepting_staff["auth_user_id"]] = accepting_staff
+    return _event(
+        document,
+        staff=True,
+        user_by_id=user_by_id,
+        test_name=(test or {}).get("name"),
+    )
 
 
 async def _close_booking(slot_id: str, user: dict, database, next_status: str) -> CounselingEvent:
@@ -262,6 +315,12 @@ async def _close_booking(slot_id: str, user: dict, database, next_status: str) -
         raise HTTPException(status_code=403, detail="Counselor or admin role required")
     if not ObjectId.is_valid(slot_id):
         raise HTTPException(status_code=404, detail="Appointment was not found")
+    current = await database.counseling_slots.find_one(
+        {"_id": ObjectId(slot_id), "status": {"$in": ["booked", "claimed"]}},
+        {"_id": 0, "accepted_by": 1, "accepted_at": 1, "claimed_by": 1, "claimed_at": 1},
+    )
+    if current is None:
+        raise HTTPException(status_code=409, detail="Appointment is no longer active")
     update = {
         "$set": {
             "status": next_status,
@@ -270,6 +329,12 @@ async def _close_booking(slot_id: str, user: dict, database, next_status: str) -
         },
         "$unset": {"claimed_by": ""},
     }
+    accepted_by_id = current.get("accepted_by") or current.get("claimed_by")
+    accepted_at = current.get("accepted_at") or current.get("claimed_at")
+    if accepted_by_id:
+        update["$set"]["accepted_by"] = accepted_by_id
+    if accepted_at:
+        update["$set"]["accepted_at"] = accepted_at
     # A canceled attempt keeps its unique attempt guard permanently. A postponed
     # attempt releases the guard so the student can choose a replacement slot.
     if next_status == "needs_reschedule":
@@ -283,7 +348,18 @@ async def _close_booking(slot_id: str, user: dict, database, next_status: str) -
         raise HTTPException(status_code=409, detail="Appointment is no longer active")
     await database.counseling_time_blocks.delete_many({"booking_id": document["_id"]})
     student = await database.app_users.find_one({"auth_user_id": document.get("student_id")}, {"_id": 0, "auth_user_id": 1, "name": 1, "email": 1})
-    return _event(document, staff=True, user_by_id={student["auth_user_id"]: student} if student else {})
+    accepting_staff_id = document.get("accepted_by") or accepted_by_id
+    accepting_staff = await database.app_users.find_one({"auth_user_id": accepting_staff_id}, {"_id": 0, "auth_user_id": 1, "name": 1, "role": 1}) if accepting_staff_id else None
+    test = await database.tests.find_one({"_id": document.get("test_id")}, {"name": 1})
+    user_by_id = {student["auth_user_id"]: student} if student else {}
+    if accepting_staff:
+        user_by_id[accepting_staff["auth_user_id"]] = accepting_staff
+    return _event(
+        document,
+        staff=True,
+        user_by_id=user_by_id,
+        test_name=(test or {}).get("name"),
+    )
 
 
 @router.post("/appointments/{slot_id}/postpone", response_model=CounselingEvent)

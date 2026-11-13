@@ -19,70 +19,89 @@ Keep route handlers focused on HTTP concerns. Put shared configuration and
 authentication dependencies in `core/`, database operations in `db/`, and
 validated request/response shapes in `schemas/`.
 
-## Seed test catalog
+## Fresh database setup
 
-The test catalog seed script creates or updates the five starter tests in the
-MongoDB `tests` collection. Each document stores only the test `name`; MongoDB
-generates its `_id` automatically. It is safe to run repeatedly: records are
-upserted by `name`, and unrelated documents are not deleted. The script also
-removes the old `id` field from these five records if they were seeded by an
-earlier version. It is never run automatically by FastAPI.
+Run these steps once for each new database, from its own backend environment.
+The backend creates its MongoDB indexes when it starts, but seed data is not
+created automatically. Set `MONGODB_URI` and `MONGODB_DATABASE` before starting
+the backend; check carefully that they point to the database you intend to
+initialize. Never commit credentials or paste them into commands.
 
-With a local backend `.env` configured for the database you intend to populate:
+The seed commands are repeatable and safe to rerun. The test catalog and
+question sets are upserted; built-in forms are inserted if missing. The Student
+Cumulative Form seed also repairs its Section 8 support choices and Section 9
+condition on an existing form, without changing submissions or other sections. The
+test catalog includes Beck, DASS-21, BRS, and PCL-5. C-SSRS is not included.
 
-```powershell
-uv run --env-file .env python -m app.scripts.seed_tests
-```
+### Local Docker environment
 
-To run it against the database configured in a running Docker Compose backend:
+1. Start MongoDB. The local Compose file runs the backend only, so MongoDB must
+   be running separately. Create `.env` from `.env.sample`, then set
+   `MONGODB_URI` to an address reachable from the backend container (for
+   MongoDB running on the host, use `mongodb://host.docker.internal:27017`)
+   and set `MONGODB_DATABASE` to a new local database name:
 
-```powershell
-docker compose exec backend python -m app.scripts.seed_tests
-```
+   ```powershell
+   Copy-Item .env.sample .env
+   ```
 
-To seed the 21-item Beck questionnaire version from the user-provided PDF into
-`test_questions`, run:
+2. Start the backend from this directory:
 
-```powershell
-uv run --env-file .env python -m app.scripts.seed_beck_questions
-```
+   ```powershell
+   docker compose up --build -d
+   ```
 
-Or, for the database configured in Docker Compose:
+3. Seed the catalog, assessment questions, and survey forms in order:
 
-```powershell
-docker compose exec backend python -m app.scripts.seed_beck_questions
-```
+   ```powershell
+   docker compose exec backend python -m app.scripts.seed_tests
+   docker compose exec backend python -m app.scripts.seed_beck_questions
+   docker compose exec backend python -m app.scripts.seed_dass21_questions
+   docker compose exec backend python -m app.scripts.seed_brs_questions
+   docker compose exec backend python -m app.scripts.seed_pcl5_questions
+   docker compose exec backend python -m app.scripts.seed_student_cumulative_form
+   docker compose exec backend python -m app.scripts.seed_exit_survey_forms
+   ```
 
-To add the Student Cumulative Form (`OVPAA-SAS-GCO-04`) to the configured
-MongoDB database, run the seed once per environment:
+4. Confirm the backend is healthy at http://localhost:5011/health. User records
+   are created at first Google sign-in; no user seed command is needed.
 
-```powershell
-uv run --env-file .env python -m app.scripts.seed_student_cumulative_form
-```
+The catalog must be seeded before the four assessment question sets. The exit
+forms are request-only and become available to a student after the student
+requests each one. The Student Cumulative Form must be submitted before a
+student can access Requests. The exit-form seeder adds the Shifting/Transferring
+Exit Interview (`OVPAA-SAS-GCO-03B`) and Graduating Students Exit Survey
+(`OVPAA-SAS-GCO-03A`).
 
-For the backend database configured in Docker Compose:
+### Dokploy deployment environments
 
-```powershell
-docker compose exec backend python -m app.scripts.seed_student_cumulative_form
-```
+Initialize each environment separately after its MongoDB service and backend
+Application are running. Ensure the backend's `MONGODB_URI` and
+`MONGODB_DATABASE` refer to the intended environment's database, and confirm
+the backend container can resolve and reach the MongoDB service. Dev, UAT, and
+production should use separate databases and credentials. Configure these
+values in each Dokploy backend Application's environment settings; never use a
+local `.env` file or expose database credentials in Git.
 
-In Dokploy, open the backend container's terminal and run:
+In Dokploy, open the matching **backend Application**, open its Docker Terminal,
+and select the running backend container. Run the following commands there;
+do not run them in the frontend or MongoDB container:
 
 ```sh
+python -m app.scripts.seed_tests
+python -m app.scripts.seed_beck_questions
+python -m app.scripts.seed_dass21_questions
+python -m app.scripts.seed_brs_questions
+python -m app.scripts.seed_pcl5_questions
 python -m app.scripts.seed_student_cumulative_form
+python -m app.scripts.seed_exit_survey_forms
 ```
 
-The seed inserts the built-in form definition only when it is not already
-present. It never runs automatically at application startup and does not
-overwrite an existing form. Check `MONGODB_DATABASE` before running it.
-
-The script is repeatable and upserts by test and question key. It replaces the
-earlier demo prompts for this test and keeps each choice's 0-3 score value. The
-question set is treated as fixed; the script also removes legacy question
-version metadata when it runs. It is never run automatically by FastAPI.
-
-Check `MONGODB_DATABASE` before running the command so you seed the intended
-local, dev, or UAT database. Keep the database URI private.
+Repeat the commands in each environment that needs fresh seed data or the
+Student Cumulative Form conditional-display repair. Output is
+shown in the Docker Terminal. The assessment seeders report 21 questions for
+Beck and DASS-21, six for BRS, and 20 for PCL-5. These commands do not clear
+existing users, submissions, appointments, or other application data.
 
 ## Setup
 
@@ -113,21 +132,30 @@ Local development enables the interactive documentation.
 
 ## Counseling calendar
 
-Students can book one counseling appointment for a submitted Beck assessment
-by selecting an empty calendar time. Counselors and administrators see the
-shared calendar; counselors claim unassigned bookings, and staff can postpone
-or cancel a booking. A postponed assessment can be booked again; a canceled
-assessment cannot. Booking times are stored in UTC. The frontend displays them
-in Asia/Manila time.
+Students can book counseling from Requests without first submitting a test, or
+book one appointment for a submitted Beck, DASS-21, BRS, or PCL-5 assessment by
+selecting an empty calendar time. Requests bookings require a student note that
+is visible to the student and authorized staff. For assessment bookings, staff
+calendar details include the student's name, email, full test name, and a link
+to the submitted response; those generated details are not returned to students.
+Counselors and administrators see the shared calendar; either role can accept
+an unassigned booking. The accepting staff member is recorded separately so
+their name and role remain available after a booking is postponed or canceled.
+Staff can postpone or cancel an active booking. A postponed assessment can be
+booked again; a canceled assessment cannot. Booking times are
+stored in UTC. The frontend displays them in Asia/Manila time.
 
 The API provides:
 
 - GET /counseling/appointments?start=<ISO>&end=<ISO>&attempt_id=<UUID> —
-  the requesting student's bookings or the shared staff calendar.
-- POST /counseling/appointments — student books a selected time for a submitted
-  Beck attempt_id.
-- POST /counseling/appointments/{appointment_id}/claim — counselor claims an unassigned
-  booking.
+  bookings for the student's submitted assessment or the shared staff calendar.
+- GET /counseling/appointments?start=<ISO>&end=<ISO>&booking_type=request —
+  the requesting student's Requests bookings.
+- POST /counseling/appointments — student books a one-hour time using either a
+  submitted supported-test `attempt_id` or a required `note` for a Requests
+  booking; the two booking inputs are mutually exclusive.
+- POST /counseling/appointments/{appointment_id}/claim — a counselor or
+  administrator accepts an unassigned booking.
 - POST /counseling/appointments/{appointment_id}/postpone and /cancel — staff changes a
   booking state.
 
@@ -135,8 +163,8 @@ FastAPI derives identity and role from the verified Next.js BFF token. Students
 only receive their own bookings; unoccupied calendar times can be selected
 directly. Staff receives the student and assessment details needed to handle
 appointments. Clicking a calendar time opens a confirmation dialog where the
-student chooses the start; the end is fixed to exactly one hour later. Dragging
-a range pre-fills the start time. Start times use 30-minute increments between
+student chooses the start; the end is fixed to exactly one hour later. Requests
+bookings also collect a required counseling note. Dragging a range pre-fills the start time. Start times use 30-minute increments between
 7:00 AM and 6:00 PM Manila time. MongoDB unique indexes reserve each half-hour block and prevent
 overlapping appointments or duplicate active bookings under concurrent requests.
 
@@ -260,14 +288,30 @@ DNS, Dokploy Applications, Git branches, databases, or remote deployments.
 
 The UAT Application should use the production Docker target, `APP_ENV=production`,
 no reload command, HTTPS, and no published host port. Keep secrets in Dokploy's
-environment settings rather than Git. Give UAT its own credentials and data
-when a database is added. Limit access to UAT at the proxy or application layer
+environment settings rather than Git. Give UAT its own database credentials and
+data. Limit access to UAT at the proxy or application layer
 if it should be private; HTTPS alone does not restrict who can sign in.
 
 For a production-ready operational setup, also configure Dokploy restart and
 resource limits, retain deployment/runtime logs, and monitor uptime and health.
 Add explicit CORS origins when the frontend begins calling this API. Keep
 database backups and restore checks in scope once persistent data is introduced.
+
+### Clear test responses
+
+To clear all test drafts and submitted responses for one environment, run this
+command in that environment's backend Docker Terminal:
+
+```sh
+python -m app.scripts.clear_test_responses
+```
+
+The command uses that backend's `MONGODB_URI` and `MONGODB_DATABASE`. It removes
+only `test_responses` records, including drafts. Test definitions, questions,
+and counseling appointments are left unchanged. Run it separately in each
+environment whose test responses you intend to clear; do not run it as part of
+normal deployment or startup. It also creates the unique index used to enforce
+one submitted response per student and test.
 
 ## Authentication API and MongoDB
 
@@ -287,32 +331,49 @@ profile and role-management endpoints require a valid BFF token.
 - `GET /tests/{test_id}/questions` returns the ordered question records for a
   catalog entry and requires a valid BFF token.
 - `GET /tests/{test_id}/responses/draft` returns only the signed-in user's own
-  unfinished Beck draft. `PUT` on the same route saves or updates that draft.
+  unfinished draft for a supported assessment. `PUT` on the same route saves
+  or updates that draft.
 - `POST /tests/{test_id}/responses/draft/start` starts or resumes that user's
   active attempt and returns its opaque attempt ID.
-- `POST /tests/{test_id}/responses/submit` validates all 21 Beck answers,
-  calculates the total on the backend, stores the submission, and returns the
-  score and interpretation. The backend reads option scores from MongoDB; it
-  does not trust a client-provided score.
+- `POST /tests/{test_id}/responses/submit` validates answers for the supported
+  BDI, DASS-21, BRS, or PCL-5 questionnaire and calculates scores on the backend. BDI
+  returns its total score; DASS-21 returns separate Depression, Anxiety, and
+  Stress scores; BRS returns the six-item mean; PCL-5 returns the 20-item total
+  and a screening interpretation. The backend reads option scores
+  from MongoDB and does not trust a client-provided score.
+  Answer and draft endpoints are student-only, and each student may submit once
+  per test.
 - `GET /tests/{test_id}/responses/me` returns the signed-in user's score and
-  interpretation for their latest submission without returning item-level
+  interpretation for their submitted assessment without returning item-level
   answers.
-- `GET /tests/{test_id}/responses/staff` returns submitted item-level answers
-  and is restricted to users whose current role is `counselor` or `admin`.
-  The endpoint returns at most 100 submissions per request.
+- `GET /tests/{test_id}/responses/staff` returns paginated student and
+  submission metadata for counselors and admins. Search with `q`, and page with
+  `limit` and `skip`; answers are not included in this list.
+- `GET /tests/{test_id}/responses/{attempt_id}` returns one submitted answer
+  set to its owner or to a counselor/admin reviewing a student's response.
 - `PATCH /admin/users/{google_sub}/role` changes a user's role and is restricted
   to admins. Valid roles are `student`, `counselor`, and `admin`; admins cannot
   change their own role.
 
-Beck answers and scores are stored in `test_responses`. The participant can
-save and resume their own draft and see their aggregate score after submission;
-only counselors and admins can retrieve submitted item-level answers. A
-participant can start another attempt after submitting; earlier submissions
-remain available to staff. The category thresholds follow the interpretation
+Test answers and scores are stored in `test_responses`. A student can save and
+resume their own draft and see their result after submission; only counselors
+and admins can retrieve submitted item-level answers. A student may submit only
+once per test. The BDI category thresholds follow the interpretation
 table in the supplied Beck PDF: 1–10, 11–16, 17–20,
 21–30, 31–40, and over 40. The minimum possible score (0) is grouped with the
 lowest band. The displayed category is screening feedback, not a diagnosis.
 
+The DASS-21 result reports Depression, Anxiety, and Stress scale sums doubled
+to the DASS-42-equivalent range, with each scale interpreted using its own
+severity bands from the supplied PDF. It does not produce a combined total.
+The BRS result is the mean of the six scored items, rounded to two decimals,
+with the supplied PDF's Low Resilience (1.00–2.99), Normal Resilience
+(3.00–4.30), and High Resilience (4.31–5.00) bands.
+The PCL-5 total ranges from 0 to 80. Its interpretation notes that a screening
+cutoff in the 31–33 range is commonly used, while emphasizing that cutoff choice
+depends on the population and purpose. This range follows the [VA National
+Center for PTSD scoring guide](https://www.ptsd.va.gov/professional/assessment/documents/using-PCL5.pdf).
+The result is not a diagnosis.
 The staff response includes a follow-up flag when Beck item 9 is scored above
 zero. This flag is not an alert or a complete risk assessment. The organization
 must define and staff a timely follow-up procedure before using the assessment

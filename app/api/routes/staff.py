@@ -120,7 +120,7 @@ async def get_student_summary(
 
     student_user_id = student["auth_user_id"]
     form_documents = await database.forms.find(
-        {}, {"form_key": 1, "title": 1, "form_number": 1}
+        {}, {"form_key": 1, "title": 1, "form_number": 1, "access_mode": 1}
     ).sort("title", 1).to_list(length=1000)
     form_submissions = await database.form_submissions.find(
         {"student_user_id": student_user_id},
@@ -129,6 +129,11 @@ async def get_student_summary(
     form_submission_by_key = {
         document["form_key"]: document for document in form_submissions
     }
+    form_access_requests = await database.form_access_requests.find(
+        {"student_user_id": student_user_id},
+        {"_id": 0, "form_key": 1, "requested_at": 1},
+    ).to_list(length=1000)
+    request_by_key = {document["form_key"]: document for document in form_access_requests}
     surveys = []
     for form in form_documents:
         submission = form_submission_by_key.get(form["form_key"])
@@ -137,6 +142,8 @@ async def get_student_summary(
                 form_key=form["form_key"],
                 title=form.get("title") or form["form_key"],
                 form_number=form.get("form_number") or "",
+                access_mode=form.get("access_mode", "always"),
+                requested_at=(request_by_key.get(form["form_key"]) or {}).get("requested_at"),
                 submitted_at=submission.get("submitted_at") if submission else None,
                 response_id=str(submission["_id"]) if submission else None,
             )

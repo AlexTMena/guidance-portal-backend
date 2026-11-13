@@ -26,4 +26,5 @@ class TestQuestion(BaseModel):
     max_value: int | None = None
     min_label: str | None = None
     max_label: str | None = None
+    scale: Literal["Depression", "Anxiety", "Stress"] | None = None
     is_demo: bool = False
