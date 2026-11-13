@@ -1,4 +1,4 @@
-# Guidance Portal Backend
+# e-Gabay Backend
 
 A minimal FastAPI service running on Python 3.14 with dependencies managed by uv.
 
