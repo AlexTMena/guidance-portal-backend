@@ -8,6 +8,8 @@ class StudentSurveySummary(BaseModel):
     form_key: str
     title: str
     form_number: str
+    access_mode: Literal["always", "request"] = "always"
+    requested_at: datetime | None = None
     submitted_at: datetime | None = None
     response_id: str | None = None
 

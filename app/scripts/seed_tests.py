@@ -4,7 +4,6 @@ from pymongo import MongoClient, UpdateOne
 
 
 TESTS = [
-    "COLUMBIA-SUICIDE SEVERITY RATING SCALE (C-SSRS)",
     "Beck's Depression Inventory",
     "THE BRIEF RESILIENCE SCALE",
     "PTSD Checklist for DSM-5 (PCL-5)",
